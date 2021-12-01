@@ -1,0 +1,41 @@
+---
+title: "Initial data assembly"
+author: "Carole Voulgaris"
+date: "12/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read in large file
+
+
+```{r}
+library(tidyverse)
+library(sf)
+```
+
+```{r}
+ami <- st_read(
+  "Data/parsed_data/percentage_between_80-120_AMI.geojson") %>%
+  rename(pct_lt_80ami = perc_citizens_lower_than_80.ami,
+    pct80_120ami = perc_citizens_betwee80..120.ami,
+    pct_gt_120ami = perc_citizens_higher_than_120.ami) %>%
+  select(OBJECTID, pct_lt_80ami, pct80_120ami, pct_gt_120ami) %>%
+  st_set_geometry(NULL)
+
+gen_entropy <- st_read(
+  "Data/parsed_data/age_entropy.geojson")
+
+parcels <- st_read("Data/parsed_data/pittsburgh_parcels_centroids.geojson") %>%
+  select(OBJECTID) %>%
+  left_join(ami)
+
+
+
+st_write(parcels, dsn = "parcels.geojson")
+```
+
+
