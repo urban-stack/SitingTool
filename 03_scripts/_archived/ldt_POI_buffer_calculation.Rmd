@@ -1,0 +1,71 @@
+---
+title: "ldt_POI_calculation"
+author: "Tianyu Su"
+date: "8/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(tidycensus)
+library(sf)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+1. Load 
+1.1 Load parcel data
+```{r}
+
+# laod parcel data
+parcel_centroid_uniqueID <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/parcel/parcel_centroid_uniqueID.geojson")
+parcel_centroid_uniqueID_sf <- st_as_sf(parcel_centroid_uniqueID)
+
+```
+
+1.2 Load SafeGraph POI data
+# I used SafeGraph POI data, as it is more accurate and up-to-date.
+# Docs: https://docs.safegraph.com/docs/core-places
+```{r}
+
+pa_poi <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/poi/safegraphPOI/CorePlaces") %>%
+  dplyr::select(placekey, sg_c__naics_code, sg_c__top_category, sg_c__latitude, sg_c__longitude, sg_c__city, sg_c__closed_on)
+
+pa_poi
+
+```
+
+1.3 Filter the POI data
+```{r}
+
+pa_poi_grocery_open <- pa_poi %>%
+  filter(sg_c__naics_code == 445110) %>%
+  filter(is.na(sg_c__closed_on))
+
+write.csv(pa_poi_grocery_open, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/poi/safegraphPOI/pa_poi_grocery_open.csv", row.names = FALSE)
+
+```
+
+2. Create buffers
+# https://www.rdocumentation.org/packages/rgeos/versions/0.5-5/topics/gBuffer
+# https://stackoverflow.com/questions/25411251/buffer-geospatial-points-in-r-with-gbuffer
+```{r}
+
+parcel_centroid_modeShare <- st_join(parcel_centroid_uniqueID_sf, pittsburgh_acs_transportationToWork_shp)
+parcel_centroid_modeShare
+
+write.csv(parcel_centroid_modeShare, "02_data/modeShare/parcel_centroid_modeShare.csv", row.names = FALSE)
+
+```

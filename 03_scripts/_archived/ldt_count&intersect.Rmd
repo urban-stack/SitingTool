@@ -1,0 +1,120 @@
+---
+title: "ldt_count&intersect"
+author: "Tianyu Su"
+date: "8/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(tidycensus)
+library(sf)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+1. Load 
+```{r}
+
+# load parcel buffer data
+parcel_centroid_buffer_6346 <- st_read("02_data/parcel/parcel_centroid_buffer_6346.geojson")
+parcel_centroid_buffer_6346_sf <- st_as_sf(parcel_centroid_buffer_6346) %>%
+  dplyr::select(UNIQUEID, X, Y)
+
+```
+
+```{r}
+
+# load POI data
+pa_poi_grocery_open_sf_6346 <- st_read("02_data/poi/pa_poi_grocery_open_sf_6346.geojson")
+pa_poi_grocery_open_sf_6346_sf <- st_as_sf(pa_poi_grocery_open_sf_6346)
+
+# load street intersection data
+street_intersections_6346 <- st_read("02_data/intersection/StreetIntersections.geojson")
+street_intersections_6346_sf <- st_as_sf(street_intersections_6346)
+#! The intersection file has a lot of duplicated points
+street_intersections_6346_sf_clean = street_intersections_6346_sf[!duplicated(street_intersections_6346_sf$geometry),]
+street_intersections_6346_sf_clean
+# street_intersections_4326_sf_clean <- st_transform(street_intersections_6346_sf_clean, 4326)
+# street_intersections_coord <- st_coordinates(street_intersections_4326_sf_clean)
+# street_intersections_4326 <- cbind(street_intersections_4326_sf_clean, street_intersections_coord)
+# st_write(street_intersections_4326, "02_data/intersection/street_intersections_4326.geojson")
+
+# load park data
+park_6346 <- st_read("02_data/park/park_6346.geojson")
+park_6346_sf <- st_as_sf(park_6346)
+# park_4326_sf <- st_transform(park_6346_sf, 4326)
+# st_write(park_4326_sf, "02_data/park/park_4326_sf.geojson")
+
+```
+
+2. Count points in each parcel buffer
+A perfect example: https://vis-2129-f2020.github.io/tutorials/Week4 
+```{r}
+
+# Count grocery POIs
+parcel_poi_count <- parcel_centroid_buffer_6346_sf %>%
+  mutate(num_grocery = lengths(st_covers(parcel_centroid_buffer_6346_sf, pa_poi_grocery_open_sf_6346_sf))) %>%
+  st_set_geometry(NULL)
+
+parcel_poi_count
+write.csv(parcel_poi_count, "02_data/poi/parcel_poi_count.csv", row.names = FALSE)
+
+# Count street intersections
+parcel_intersection_count <- parcel_centroid_buffer_6346_sf %>%
+  mutate(num_intersection = lengths(st_covers(parcel_centroid_buffer_6346_sf, street_intersections_6346_sf_clean))) %>%
+  st_set_geometry(NULL)
+
+parcel_intersection_count
+write.csv(parcel_intersection_count, "02_data/intersection/parcel_intersection_count.csv", row.names = FALSE)
+
+```
+
+2. Calculate park areas in each parcel buffer
+```{r}
+
+library(sp)
+library(raster)
+library(rgdal)
+library(rgeos)
+
+```
+
+```{r}
+
+parcel_centroid_buffer_6346_sp <- as_Spatial(parcel_centroid_buffer_6346_sf)
+park_6346_sp <- as_Spatial(park_6346_sf)
+
+# Test 1 (not working)
+parcel_park_intersect <-  gIntersects (parcel_centroid_buffer_6346_sp, park_6346_sp, byid=FALSE)
+parcel_park_intersect
+
+as.vector(parcel_park_intersect)
+
+# Test 2: https://vis-2129-f2020.github.io/tutorials/Week4#Identifying_overlapping_polygons 
+parcel_park_overlap <- parcel_centroid_buffer_6346_sf %>%
+  mutate(num_park_overlap = lengths(st_overlaps(st_make_valid(parcel_centroid_buffer_6346_sf), st_make_valid(park_6346_sf)))) %>%
+  st_set_geometry(NULL)
+
+parcel_park_overlap
+
+write.csv(parcel_park_overlap, "02_data/park/parcel_park_overlap.csv", row.names = FALSE)
+
+
+#? How to turn it in a df?
+st_overlaps(st_make_valid(parcel_centroid_buffer_6346_sf), st_make_valid(park_6346_sf))
+
+
+```

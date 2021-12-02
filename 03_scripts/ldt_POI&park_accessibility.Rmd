@@ -1,0 +1,113 @@
+---
+title: "ldt_POI&park_accessibility"
+author: "Tianyu Su"
+date: "9/5/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(sf)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+```{r}
+
+# install.packages("r5r")
+# allocate enough memory for r5r
+options(java.parameters = "-Xmx8G")
+
+# Rapid Realistic Routing with R5 in R
+library(r5r)
+
+```
+1. Set up r5r
+```{r}
+# set up the data path
+pittsburg_data_path <- file.path("02_data/r5r")
+list.files(pittsburg_data_path)
+
+# build routable transport network with setup_r5()
+r5r_core <- setup_r5(data_path = pittsburg_data_path, verbose = FALSE)
+
+```
+2. Load data
+```{r}
+
+# laod parcel data
+parcel_centroid_uniqueID <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/parcel/parcel_centroid_uniqueID.geojson")
+parcel_centroid_uniqueID_sf <- st_as_sf(parcel_centroid_uniqueID) %>%
+  rename(id = UNIQUEID)
+
+parcel_centroid_uniqueID_sf
+
+# load POI data
+pa_poi_grocery_open <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/poi/safegraphPOI/pa_poi_grocery_open.csv")
+pa_poi_grocery_open_sf <- st_as_sf(pa_poi_grocery_open, coords = c("sg_c__longitude", "sg_c__latitude"), crs = 4326, agr = "constant") %>%
+  rename(id = placekey) %>%
+  mutate(opportunity = 1)
+pa_poi_grocery_open_sf
+
+# load park data
+park <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/park/park_4326_sf.geojson") %>%
+  dplyr::select(full_id, osm_id, leisure, name, geometry)
+park_sf <- st_as_sf(park)
+# extract park centroids
+park_centroid <- st_centroid(park_sf) %>%
+  rename(id = full_id) %>%
+  mutate(opportunity = 1)
+park_centroid
+# write_sf(park_centroid, dsn = "02_data/park/park_centroid.geojson")
+
+```
+3. calculate grocery store and park accessibility using the r5r package
+```{r}
+
+# routing inputs
+mode <- "WALK"
+max_walk_dist <- 1000 # in meters
+travel_time_cutoff <- 21 # in minutes
+departure_datetime <- as.POSIXct("07-07-2021 8:00:00", format = "%d-%m-%Y %H:%M:%S")
+
+# grocery store accessibility
+access_grocery <- accessibility(r5r_core,
+                        origins = parcel_centroid_uniqueID_sf,
+                        destinations = pa_poi_grocery_open_sf,
+                        mode = mode,
+                        opportunities_colname = "opportunity",
+                        decay_function = "step",
+                        cutoffs = travel_time_cutoff,
+                        departure_datetime = departure_datetime,
+                        max_walk_dist = max_walk_dist,
+                        verbose = FALSE)
+
+write.csv(access_grocery, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/poi/access_grocery.csv", row.names = FALSE)
+
+# park accessibility
+access_park <- accessibility(r5r_core,
+                        origins = parcel_centroid_uniqueID_sf,
+                        destinations = park_centroid,
+                        mode = mode,
+                        opportunities_colname = "opportunity",
+                        decay_function = "step",
+                        cutoffs = travel_time_cutoff,
+                        departure_datetime = departure_datetime,
+                        max_walk_dist = max_walk_dist,
+                        verbose = FALSE)
+
+write.csv(access_park, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/park/access_park.csv", row.names = FALSE)
+
+```

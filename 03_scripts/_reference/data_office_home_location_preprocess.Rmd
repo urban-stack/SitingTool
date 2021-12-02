@@ -1,0 +1,237 @@
+---
+title: "data_travel_time"
+author: "Tianyu Su"
+date: "1/26/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/sutianyu/Dropbox (MIT)/05_Work/Thesis/02_data")
+```
+
+```{r}
+
+# install.packages("gmapsdistance")
+
+library(tidyverse)
+library(tidycensus)
+library(dplyr)
+library(purrr)
+library(spData)
+library(sf)
+library(sp)
+library(googleway)
+library(gmapsdistance)
+library(raster)
+library(mapdeck)
+library(maptools)
+library(here)
+library(rmapzen)
+library(geojsonio)
+
+```
+
+```{r}
+set.api.key("")
+api_key <- ''
+```
+
+# load sample list and geoid data
+```{r}
+
+sample_Q3_small <- read_csv("sample_list/sample_Q3_small.csv") %>%
+  dplyr::select(MITID)
+
+geoid_df <- read_csv("all_transportation_and_hr_mit_ids_with_geoid.csv") %>%
+  dplyr::select(MITID, GEOID_FY2018) %>%
+  rename(geoid = GEOID_FY2018)
+
+sample_Q3_small_geo <- sample_Q3_small %>%
+  left_join(geoid_df, by = "MITID") %>%
+  filter(!is.na(geoid))
+
+sample_Q3_small_geo
+
+sample_Q3_small_geo_id <- unique(pull(sample_Q3_small_geo, MITID))
+
+```
+
+# load the office location data and add coordinates
+# ```{r}
+# 
+# office <- read_csv("office/office_valid.csv")
+# 
+# building_unique <- data.frame(matrix(unlist(unique(pull(office, building))), 
+#                                      nrow=length(unique(pull(office, building))), byrow=T)) %>% 
+#   rename(building = matrix.unlist.unique.pull.office..building.....nrow...length.unique.pull.office..) %>%
+#   mutate(building = sub("^", "MIT_", building))
+# 
+# # define functions extracting lat and lng
+# gmapplace_lat <- function (place_name) {
+#   result <- google_places(search_string = place_name, key = api_key, simplify = TRUE)
+#   lat <- result[[2]]$geometry$location[1,]$lat
+#   return(lat)
+# }
+# 
+# gmapplace_lng <- function (place_name) {
+#   result <- google_places(search_string = place_name, key = api_key, simplify = TRUE)
+#   lng <- result[[2]]$geometry$location[1,]$lng
+#   return(lng)
+# }
+# 
+# gmapplace_lat("MIT_5")
+# 
+# ```
+
+# ```{r}
+# 
+# building_unique
+# 
+# building_unique_40 <- slice(building_unique, 1:40)
+# 
+# building_coords_40 <- building_unique_40 %>%
+#   mutate(office_lat = map(.data$building, gmapplace_lat)) %>%
+#   mutate(office_lng = map(.data$building, gmapplace_lng)) %>%
+#   tidyr::extract(office_lat, "office_lat", "([^(]+)\\s*[^9]+", convert = FALSE) %>%
+#   tidyr::extract(office_lng, "office_lng", "([^(]+)\\s*[^9]+", convert = FALSE)
+# 
+# building_unique_80 <- slice(building_unique, 41:80)
+# 
+# building_coords_80 <- building_unique_80 %>%
+#   mutate(office_lat = map(.data$building, gmapplace_lat)) %>%
+#   mutate(office_lng = map(.data$building, gmapplace_lng)) %>%
+#   tidyr::extract(office_lat, "office_lat", "([^(]+)\\s*[^9]+", convert = FALSE) %>%
+#   tidyr::extract(office_lng, "office_lng", "([^(]+)\\s*[^9]+", convert = FALSE)
+# 
+# building_unique_120 <- slice(building_unique, 81:120)
+# 
+# building_coords_120 <- building_unique_120 %>%
+#   mutate(office_lat = map(.data$building, gmapplace_lat)) %>%
+#   mutate(office_lng = map(.data$building, gmapplace_lng)) %>%
+#   tidyr::extract(office_lat, "office_lat", "([^(]+)\\s*[^9]+", convert = FALSE) %>%
+#   tidyr::extract(office_lng, "office_lng", "([^(]+)\\s*[^9]+", convert = FALSE)
+# 
+# building_unique_160 <- slice(building_unique, 121:160)
+# 
+# building_coords_160 <- building_unique_160 %>%
+#   mutate(office_lat = map(.data$building, gmapplace_lat)) %>%
+#   mutate(office_lng = map(.data$building, gmapplace_lng)) %>%
+#   tidyr::extract(office_lat, "office_lat", "([^(]+)\\s*[^9]+", convert = FALSE) %>%
+#   tidyr::extract(office_lng, "office_lng", "([^(]+)\\s*[^9]+", convert = FALSE)
+# 
+# ```
+
+# ```{r}
+# 
+# building_coords_40
+# write.csv(building_coords_40,"office/building_coords_40.csv", row.names = FALSE)
+# 
+# building_coords_80
+# write.csv(building_coords_80,"office/building_coords_80.csv", row.names = FALSE)
+# 
+# building_coords_120
+# write.csv(building_coords_120,"office/building_coords_120.csv", row.names = FALSE)
+# 
+# building_coords_160
+# write.csv(building_coords_160,"office/building_coords_160.csv", row.names = FALSE)
+# 
+# building_coords <- rbind(building_coords_40, building_coords_80, building_coords_120, building_coords_160)
+# write.csv(building_coords,"office/building_coords.csv", row.names = FALSE)
+# 
+# ```
+
+```{r}
+
+office_mit <- read_csv("office/office_valid.csv") %>%
+  mutate(building = sub("^", "MIT_", building)) %>%
+  dplyr:: select(MITID, building)
+
+building_coords <- read_csv("office/building_coords.csv") %>%
+  mutate(office_lat = as.numeric(office_lat)) %>%
+  mutate(office_lng = as.numeric(office_lng))
+
+sample_Q3_samall_office <- sample_Q3_small_geo %>%
+  left_join(office_mit, by = "MITID") %>%
+  dplyr::select(MITID, geoid, building) %>%
+  left_join(building_coords, by = "building") %>%
+  dplyr::select(MITID, building, office_lat, office_lng, geoid) %>%
+  filter(!is.na(office_lat))
+  
+sample_Q3_samall_office
+
+```
+
+# load and process block group data and add home location
+```{r}
+
+block_group <- st_read("geo_table/geo_id_bg_sf.shp") %>%
+  dplyr::select(geoid) %>%
+  mutate(as.numeric(geoid))
+
+geoid_list <- unique(pull(block_group, geoid))
+
+# a function sampling point in specific block group
+address_sampling <- function(block_group_geoid) {
+  block_group_geom <- block_group %>%
+    filter(geoid == block_group_geoid)
+  
+  block_group_geom <- block_group_geom %>%
+    slice(1:1)
+
+  sample_point <- dotsInPolys(as(block_group_geom, "Spatial"), 1, f="random")
+  coord <- coordinates(sample_point)[,2:1]
+  return(coord)
+}
+
+sample_Q3_samall_office_home <- sample_Q3_samall_office %>%
+  filter(geoid %in% geoid_list) %>%
+  mutate(home_coord = map(.data$geoid, address_sampling)) %>%
+  tidyr::extract(home_coord, c("useless", "home_c"), "([^(]+)\\s*[^0-9]+([0-9].*).", convert = FALSE) %>%
+  mutate(home_lat = as.numeric(str_split(home_c, ",", simplify = TRUE)[,1])) %>%
+  mutate(home_lng = as.numeric(str_split(home_c, "=", simplify = TRUE)[,2])) %>%
+  dplyr::select(MITID, building, office_lat, office_lng, geoid, home_lat, home_lng)
+
+sample_Q3_samall_office_home
+
+```
+
+```{r}
+
+sample_Q3_samall_office_home <- sample_Q3_samall_office_home %>%
+  mutate(office_coord = paste(office_lat, office_lng, sep = "+")) %>%
+  mutate(home_coord = paste(home_lat, home_lng, sep = "+"))
+
+sample_Q3_samall_office_home
+
+```
+
+# take arrival time into consideration
+```{r}
+
+survey_2018_employee <- read_csv("survey/2018TR_012519.csv")
+
+survey_2018_Q3_thesis_arrive <- survey_2018_employee %>%
+  filter(MitId %in% sample_Q3_small_geo_id) %>%
+  dplyr::select(MitId, TIMEARRIVE) %>%
+  rename(MITID = MitId,
+         time_arrive = TIMEARRIVE) %>%
+  mutate(time_arrive_start = str_split(time_arrive, "-", simplify = TRUE)[,1]) %>%
+  mutate(hour_arrive = as.numeric(str_split(time_arrive_start, ":", simplify = TRUE)[,1])) %>%
+  mutate(minute_arrive = as.numeric(str_split(time_arrive_start, ":", simplify = TRUE)[,2])) %>%
+  mutate(minute_arrive = coalesce(minute_arrive, 0)) %>%
+  mutate(minute_arrive_modified = minute_arrive + 15) %>%
+  mutate(time_arrive_modified = paste(hour_arrive, minute_arrive_modified, "00", sep = ":", collapse = NULL)) %>%
+  filter(!(is.na(hour_arrive))) %>%
+  dplyr::select(MITID, time_arrive_modified)
+
+survey_2018_Q3_thesis_arrive
+
+sample_Q3_samall_office_home_arrive <- sample_Q3_samall_office_home %>%
+  left_join(survey_2018_Q3_thesis_arrive, by = "MITID") 
+
+sample_Q3_samall_office_home_arrive
+
+write.csv(sample_Q3_samall_office_home_arrive,"sample_list/sample_Q3_samall_office_home_arrive.csv", row.names = FALSE)
+
+```
