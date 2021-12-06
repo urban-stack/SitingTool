@@ -1,0 +1,247 @@
+---
+title: "data_travel_time"
+author: "Tianyu Su"
+date: "1/26/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/sutianyu/Dropbox (MIT)/05_Work/Thesis/02_data")
+```
+
+```{r}
+
+# install.packages("gmapsdistance")
+
+library(tidyverse)
+library(tidycensus)
+library(dplyr)
+library(purrr)
+library(spData)
+library(sf)
+library(sp)
+library(googleway)
+library(gmapsdistance)
+library(raster)
+library(mapdeck)
+library(maptools)
+library(here)
+library(rmapzen)
+library(geojsonio)
+
+```
+
+```{r}
+set.api.key("")
+api_key <- ''
+```
+
+# load k-means result
+```{r}
+
+cluster_result <- read_csv("clustering_results/date_commute_cluster_result.csv") %>%
+  dplyr::select(MITID, k_label) %>%
+  mutate(cluster_num = k_label + 1)
+
+```
+
+```{r}
+
+sample_Q3_samall_office_home_arrive <- read_csv("sample_list/sample_Q3_samall_office_home_arrive.csv")
+
+```
+
+# travel time estimation using gmapdistance
+```{r}
+
+# travel time functions for employee with arrival time
+
+driving_morning <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "driving",
+                        traffic_model = "best_guess",
+                        arr_date = "2020-05-25", 
+                        arr_time = timearrive)
+}
+
+driving_op <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "driving",
+                        traffic_model = "optimistic",
+                        arr_date = "2020-05-25", 
+                        arr_time = timearrive)
+}
+
+driving_pes <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "driving",
+                        traffic_model = "pessimistic",
+                        arr_date = "2020-05-25", 
+                        arr_time = timearrive)
+}
+
+transit <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "transit",
+                        arr_date = "2020-05-25", 
+                        arr_time = timearrive)
+}
+
+walking <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "walking",
+                        arr_date = "2020-05-25", 
+                        arr_time = timearrive)
+}
+
+bicycling <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "bicycling",
+                        arr_date = "2020-05-25", 
+                        arr_time = timearrive)
+}
+
+```
+
+```{r}
+
+# travel time functions for employee without arrival time
+
+driving_morning_11 <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "driving",
+                        traffic_model = "best_guess",
+                        arr_date = "2020-05-25", 
+                        arr_time = "08:50:00")
+}
+
+driving_op_1 <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "driving",
+                        traffic_model = "optimistic",
+                        arr_date = "2020-05-25", 
+                        arr_time = "08:50:00")
+}
+
+driving_pes_1 <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "driving",
+                        traffic_model = "pessimistic",
+                        arr_date = "2020-05-25", 
+                        arr_time = "08:50:00")
+}
+
+transit_1 <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "transit",
+                        arr_date = "2020-05-25", 
+                        arr_time = "08:50:00")
+}
+
+walking_1 <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "walking",
+                        arr_date = "2020-05-25", 
+                        arr_time = "08:50:00")
+}
+
+bicycling_1 <- function(home, office, timearrive) {
+  gdistance <- gmapsdistance(origin = home, 
+                        destination = office, 
+                        mode = "bicycling",
+                        arr_date = "2020-05-25", 
+                        arr_time = "08:50:00")
+}
+
+```
+
+# test with the slice data
+```{r}
+
+# test <- driving_morning(sample_thesis_office_home_arrive$home_coord[1], sample_thesis_office_home_arrive$office_coord[1], sample_thesis_office_home_arrive$time_arrive_modified[1])
+# 
+# test
+# 
+# sample_thesis_office_home_arrive_10 <- slice(sample_thesis_office_home_arrive, 1:1) %>%
+#   mutate(time_arrive_modified = as.character(time_arrive_modified))
+# sample_thesis_office_home_arrive_10
+# 
+# sample_thesis_office_home_arrive_10 <- slice(sample_thesis_office_home_arrive, 1:10) %>%
+#   mutate(time_arrive_modified = as.character(time_arrive_modified)) %>%
+#   mutate(driving_morning = pmap(list(home_coord, office_coord, time_arrive_modified), .f = driving_morning)) %>%
+#   mutate(driving_morning = map(driving_morning, toString ) ) %>%
+#   separate(driving_morning, into = c("D_M_Time", "D_M_Distance", "D_M_Status"), convert = TRUE)
+# 
+# sample_thesis_office_home_arrive_10
+
+```
+
+```{r}
+
+sample_Q3_samall_office_home_arrive_1 <- sample_Q3_samall_office_home_arrive %>%
+  filter(!is.na(time_arrive_modified)) %>%
+  mutate(time_arrive_modified = as.character(time_arrive_modified))
+
+sample_Q3_samall_office_home_arrive_1_400 <- sample_Q3_samall_office_home_arrive_1 %>%
+  slice(1:400)
+
+sample_Q3_samall_office_home_arrive_1_400
+
+sample_Q3_samall_office_home_arrive_2 <- sample_Q3_samall_office_home_arrive %>%
+  filter(is.na(time_arrive_modified))
+
+```
+
+# calculate the travel time
+```{r}
+
+# necessary to turn "time" into characters before feeding into the functions
+sample_Q3_samall_office_home_arrive_time_1_400 <- sample_Q3_samall_office_home_arrive_1_400 %>% 
+  mutate(time_arrive_modified = as.character(time_arrive_modified)) %>%
+  mutate(driving_morning = pmap(list(home_coord, office_coord, time_arrive_modified), .f = driving_morning)) %>%
+  mutate(driving_op = pmap(list(home_coord, office_coord, time_arrive_modified), .f = driving_op)) %>%
+  mutate(driving_pes = pmap(list(home_coord, office_coord, time_arrive_modified), .f = driving_pes)) %>%
+  mutate(transit = pmap(list(home_coord, office_coord, time_arrive_modified), .f = transit)) %>%
+  mutate(walking = pmap(list(home_coord, office_coord, time_arrive_modified), .f = walking)) %>%
+  mutate(bicycling = pmap(list(home_coord, office_coord, time_arrive_modified), .f = bicycling)) %>%
+  mutate(driving_morning = map(driving_morning, toString ) ) %>%
+  separate(driving_morning, into = c("D_M_Time", "D_M_Distance", "D_M_Status"), convert = TRUE) %>%
+  mutate(driving_op = map(driving_op, toString ) ) %>%
+  separate(driving_op, into = c("D_O_Time", "D_O_Distance", "D_O_Status"), convert = TRUE) %>%
+  mutate(driving_pes = map(driving_pes, toString ) ) %>%
+  separate(driving_pes, into = c("D_P_Time", "D_P_Distance", "D_P_Status"), convert = TRUE) %>%
+  mutate(transit = map(transit, toString ) ) %>%
+  separate(transit, into = c("T_Time", "T_Distance", "T_Status"), convert = TRUE) %>%
+  mutate(walking = map(walking, toString ) ) %>%
+  separate(walking, into = c("W_Time", "W_Distance", "W_Status"), convert = TRUE) %>%
+  mutate(bicycling = map(bicycling, toString ) ) %>%
+  separate(bicycling, into = c("B_Time", "B_Distance", "B_Status"), convert = TRUE) %>%
+  dplyr::select(MITID, building, office_lat, office_lng, geoid, home_lat, home_lng, time_arrive_modified, D_M_Time, D_O_Time, D_P_Time, T_Time, W_Time, B_Time)
+
+sample_Q3_samall_office_home_arrive_time_1_400
+
+
+write.csv(sample_Q3_samall_office_home_arrive_time_1_400,"travel_time/sample_Q3_samall_office_home_arrive_time_1_400.csv", row.names = FALSE)
+
+```
+
+```{r}
+
+sample_Q3_small_home_office_cluster <- sample_Q3_samall_office_home_arrive %>%
+  left_join(cluster_result %>% dplyr::select(MITID, cluster_num), by = "MITID")
+
+write.csv(sample_Q3_small_home_office_cluster,"travel_time/sample_Q3_small_home_office_cluster.csv", row.names = FALSE)
+
+```

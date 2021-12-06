@@ -1,0 +1,191 @@
+---
+title: "ldt_transit_accessibility"
+author: "Tianyu Su"
+date: "8/2/2021"
+output: html_document
+---
+
+! I updated this script on August 2 to use the preprocessed parcel centroid data with unique IDs.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(sf)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+```{r}
+
+# install.packages("r5r")
+# allocate enough memory for r5r
+options(java.parameters = "-Xmx8G")
+
+# Rapid Realistic Routing with R5 in R
+library(r5r)
+
+```
+1. Set up r5r
+```{r}
+# set up the data path
+pittsburg_data_path <- file.path("02_data/r5r")
+list.files(pittsburg_data_path)
+
+# build routable transport network with setup_r5()
+r5r_core <- setup_r5(data_path = pittsburg_data_path, verbose = FALSE)
+
+```
+2. Load data
+```{r}
+
+# laod parcel data
+parcel_centroid_uniqueID <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/parcel/parcel_centroid_uniqueID.geojson")
+parcel_centroid_uniqueID_sf <- st_as_sf(parcel_centroid_uniqueID)
+
+# load transit stop data
+pittsburgh_transit_stop <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/GTFS/stops.txt")
+write.csv(pittsburgh_transit_stop, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/GTFS/pittsburgh_transit_stop.csv", row.names = FALSE)
+
+pittsburgh_transit_stop_sf <- st_as_sf(pittsburgh_transit_stop, coords = c("stop_lon", "stop_lat"), crs = 4326, agr = "constant")
+
+pittsburgh_transit_stop_sf
+
+```
+3. calculate travel time matrix between parcel centroids and stops, with max walking distance (500 meters) and trip duration (10 minutes)
+```{r}
+
+origins <- parcel_centroid_uniqueID_sf %>% dplyr::select(UNIQUEID) %>% rename(id = UNIQUEID)
+destinations <- pittsburgh_transit_stop_sf %>% dplyr::select(stop_id) %>% rename(id = stop_id)
+
+# Confirm these two datasets share the same CRS.
+origins
+destinations
+  
+travel_time <- travel_time_matrix(r5r_core,
+                                       origins = origins,
+                                       destinations = destinations,
+                                       mode = c("WALK"),
+                                       departure_datetime = as.POSIXct("07-07-2021 8:00:00", format = "%d-%m-%Y %H:%M:%S"),
+                                       max_walk_dist = 500,
+                                       max_trip_duration = 10L)
+
+
+# "A data.table with travel time estimates (in minutes) between origin destination pairs by a given transport mode."
+travel_time
+write.csv(travel_time, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/ttm/parcel_stops_ttm.csv", row.names = FALSE)
+
+```
+
+```{r}
+
+travel_time <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/ttm/parcel_stops_ttm.csv")
+
+```
+
+4. select the nearest stops and calculate the distance
+```{r}
+
+travel_matrix <- travel_time %>%
+  rename(UNIQUEID = fromId,
+         stop_id = toId,
+         walk_time = travel_time) %>%
+  mutate(walk_distance = walk_time * 60 * 1) %>% # 1 means 1 meter/s
+  filter(walk_distance <= 500)
+
+travel_matrix_nearest <- travel_matrix %>%
+  group_by(UNIQUEID) %>%
+  mutate(my_ranks = order(order(walk_distance))) %>%
+  filter(my_ranks == 1)
+
+travel_matrix_count <- travel_matrix %>%
+  group_by(UNIQUEID) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+```
+5. Join the results with geometry
+
+```{r}
+
+# prepare the stop geometry
+stop_coord <- st_coordinates(pittsburgh_transit_stop_sf)
+stop_geom <- cbind(pittsburgh_transit_stop_sf, stop_coord) %>%
+  st_set_geometry(NULL) %>%
+  rename(stop_x = X,
+         stop_y = Y) %>%
+  dplyr::select(stop_id, stop_x, stop_y)
+
+# assemble the final data set
+## transit stops in 500m walking distance
+parcel_centroid_count <- parcel_centroid_uniqueID_sf %>%
+  left_join(travel_matrix_count, by = "UNIQUEID") %>%
+  dplyr::mutate(count = replace_na(count, 0))
+
+parcel_centroid_count
+
+## transit stop distances in 500m walking distance
+parcel_centroid_nearest <- parcel_centroid_uniqueID_sf %>%
+  left_join(travel_matrix_nearest, by = "UNIQUEID") %>%
+  left_join(stop_geom, by = "stop_id") %>%
+  filter(!is.na(stop_id))
+
+write.csv(parcel_centroid_count, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/transitAccessibility/parcel_centroid_count.csv", row.names = FALSE)
+write.csv(parcel_centroid_nearest, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/transitAccessibility/parcel_centroid_nearest.csv", row.names = FALSE)
+
+```
+
+
+
+
+
+
+Testing on viz
+```{r}
+
+# slicing rows
+pittsburgh_parcel_centroid_sf %>% slice(1:5)
+# selecting columns
+pittsburgh_parcel_centroid_sf["OBJECTID"]
+
+plot(pittsburgh_parcel_centroid_sf %>% slice(1:5))
+plot(pittsburgh_parcel_centroid_sf %>% dplyr::select(OBJECTID))
+
+
+
+
+
+```
+
+# The data set is a bit too big for leaflet
+```{r}
+
+parcels_map1 <- leaflet(pittsburgh_parcel_centroid) %>%
+  addProviderTiles(providers$CartoDB) %>%
+  addCircleMarkers(
+    radius = 1,
+    color = "Orange",
+    stroke = FALSE, fillOpacity = 0.5
+  ) %>%
+  addControl("Parcel Centroids of Pittsburgh", position = "topright")
+
+parcels_map1
+
+
+
+
+
+
+
+```
+

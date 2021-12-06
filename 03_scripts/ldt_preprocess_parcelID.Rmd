@@ -1,0 +1,66 @@
+---
+title: "ldt_preprocess_parcelID"
+author: "Tianyu Su"
+date: "8/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(sf)
+library(osmextract)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+1. Load 
+1.1 Load parcel data
+```{r}
+
+# laod parcel data
+pittsburgh_parcel <- st_read("02_data/parcel/pittsburgh_parcels.geojson")
+pittsburgh_parcel_centroid <- st_read("02_data/parcel/pittsburgh_parcels_centroids.geojson")
+
+pittsburgh_parcel_centroid_sf <- st_as_sf(pittsburgh_parcel_centroid)
+
+pittsburgh_parcel_centroid_sf
+
+```
+
+2. Preprocess
+2.1 Deal with the multiple parcels with the same ID. To tackle this problem, I created a unique ID for each parcel by combining the original parcel ID (OBJECTID) with the centroid Y coordinate.
+```{r}
+
+nrow(pittsburgh_parcel_centroid_sf)
+length(unique(pittsburgh_parcel_centroid_sf$OBJECTID))
+
+# compile the parcel centroid dataset
+parcel_coord <- st_coordinates(pittsburgh_parcel_centroid_sf)
+parcel_centroid_uniqueID <- cbind(pittsburgh_parcel_centroid_sf, parcel_coord) %>%
+  mutate(UNIQUEID = paste0(OBJECTID, "_", Y))
+
+length(unique(parcel_centroid_uniqueID$UNIQUEID))
+
+```
+
+
+3. Export
+Export the processed parcel centroid dataset.
+
+```{r}
+
+st_write(parcel_centroid_uniqueID, "02_data/parcel/parcel_centroid_uniqueID.geojson")
+
+```

@@ -1,0 +1,122 @@
+---
+title: "ldt_osm_calculation"
+author: "Tianyu Su"
+date: "7/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(sf)
+library(osmextract)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+1. Load 
+1.1 Load parcel data
+```{r}
+
+# laod parcel data
+pittsburgh_parcel <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/parcel/pittsburgh_parcels.geojson")
+pittsburgh_parcel_centroid <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/parcel/pittsburgh_parcels_centroids.geojson")
+
+pittsburgh_parcel_centroid_sf <- st_as_sf(pittsburgh_parcel_centroid)
+
+```
+
+1.2 Load OSM data
+```{r}
+
+pa_osm <- oe_read(file_path = "02_data/r5r/pennsylvania-latest.osm.pbf", layer = "points")
+
+pa_osm
+
+
+pa_osm %>%
+  group_by(highway) %>%
+  summarise(count = n())
+
+plot(pa_osm)
+
+write_sf(pa_osm, dsn = "02_data/osmProcessing/pa_osm_ponits.geojson")
+
+
+
+
+
+
+# There are something wrong with the API call
+penn_acs <- get_acs(geography = "tract", variables = "B08301_001E", state = "PA", county = "Allegheny", year = 2019, survey = "acs5", geometry = FALSE)
+
+# Thus, I used a layer created by ESRI (https://www.arcgis.com/home/item.html?id=222007e8651f4907bf29b9359a2f3252)
+acs_transportationToWork <- read.csv("02_data/modeShare/ACS_transportationToWork_simplified.csv")
+
+pittsburgh_acs_transportationToWork <- acs_transportationToWork %>%
+  filter((State == "Pennsylvania") & (County == "Allegheny County")) %>%
+  mutate(nonSOV = 100 - SOV) %>%
+  mutate(FIPS = as.character(FIPS))
+
+pittsburgh_acs_transportationToWork
+
+# Prepare the census tract data for spatial join
+pa_tract_shp <- st_read("02_data/modeShare/tl_2016_42_tract/tl_2016_42_tract.shp")
+pa_tract_shp <- st_transform(pa_tract_shp, 4326)
+
+pittsburgh_acs_transportationToWork_shp <- right_join(pa_tract_shp, pittsburgh_acs_transportationToWork, by = c("GEOID" = "FIPS")) %>%
+  dplyr::select(ObjectID, GEOID, SOV, nonSOV, geometry)
+pittsburgh_acs_transportationToWork_shp
+
+```
+
+2. Join the ACS data to parcel
+```{r}
+
+pittsburgh_parcel_centroid_modeShare <- st_join(pittsburgh_parcel_centroid_sf, pittsburgh_acs_transportationToWork_shp)
+
+pittsburgh_parcel_centroid_modeShare
+
+
+
+
+
+```
+
+3. Join the results with geometry
+REMAINING PROBLEM: multiple parcels with the same ID. We exclude them this time (July. 7).
+
+```{r}
+
+# pittsburgh_parcel_centroid_df <- as.data.frame(pittsburgh_parcel_centroid_sf)
+# 
+# pittsburgh_parcel_multi <- pittsburgh_parcel_centroid_df %>%
+#   group_by(OBJECTID) %>%
+#   summarise(count = n()) %>%
+#   arrange(desc(count)) %>%
+#   filter(count > 1)
+# 
+# pittsburgh_parcel_multi
+
+# prepare the parcel geometry
+parcel_coord <- st_coordinates(pittsburgh_parcel_centroid_sf)
+parcel_centroid_modeShare <- cbind(pittsburgh_parcel_centroid_modeShare, parcel_coord) %>%
+  st_set_geometry(NULL) %>%
+  rename(parcel_x = X,
+         parcel_y = Y) %>%
+  rename(parcel_id = OBJECTID)
+
+write.csv(parcel_centroid_modeShare, "02_data/modeShare/parcel_centroid_modeShare.csv", row.names = FALSE)
+
+```

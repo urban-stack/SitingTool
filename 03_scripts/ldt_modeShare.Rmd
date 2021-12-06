@@ -1,0 +1,83 @@
+---
+title: "ldt_modeShare"
+author: "Tianyu Su"
+date: "8/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(tidycensus)
+library(sf)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+Set up the Census API key
+```{r}
+
+census_api_key("d0297f2022e0a12a3b47929806ebcca9eecd8ceb", install = TRUE)
+# First time, reload your environment so you can use the key without restarting R.
+readRenviron("~/.Renviron")
+# You can check it with:
+Sys.getenv("CENSUS_API_KEY")
+
+```
+
+1. Load 
+1.1 Load parcel data
+```{r}
+
+# laod parcel data
+parcel_centroid_uniqueID <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/parcel/parcel_centroid_uniqueID.geojson")
+parcel_centroid_uniqueID_sf <- st_as_sf(parcel_centroid_uniqueID)
+
+```
+
+1.2 Load ACS data
+```{r}
+
+# There are something wrong with the API call
+penn_acs <- get_acs(geography = "tract", variables = "B08301_001E", state = "PA", county = "Allegheny", year = 2019, survey = "acs5", geometry = FALSE)
+
+# Thus, I used a layer created by ESRI (https://www.arcgis.com/home/item.html?id=222007e8651f4907bf29b9359a2f3252)
+acs_transportationToWork <- read.csv("02_data/modeShare/ACS_transportationToWork_simplified.csv")
+
+pittsburgh_acs_transportationToWork <- acs_transportationToWork %>%
+  filter((State == "Pennsylvania") & (County == "Allegheny County")) %>%
+  mutate(nonSOV = 100 - SOV) %>%
+  mutate(FIPS = as.character(FIPS))
+
+pittsburgh_acs_transportationToWork
+
+# Prepare the census tract data for spatial join
+pa_tract_shp <- st_read("02_data/modeShare/tl_2016_42_tract/tl_2016_42_tract.shp")
+pa_tract_shp <- st_transform(pa_tract_shp, 4326)
+
+pittsburgh_acs_transportationToWork_shp <- right_join(pa_tract_shp, pittsburgh_acs_transportationToWork, by = c("GEOID" = "FIPS")) %>%
+  dplyr::select(ObjectID, GEOID, SOV, nonSOV, geometry)
+pittsburgh_acs_transportationToWork_shp
+
+```
+
+2. Join the ACS data to parcel
+```{r}
+
+parcel_centroid_modeShare <- st_join(parcel_centroid_uniqueID_sf, pittsburgh_acs_transportationToWork_shp)
+parcel_centroid_modeShare
+
+write.csv(parcel_centroid_modeShare, "02_data/modeShare/parcel_centroid_modeShare.csv", row.names = FALSE)
+
+```

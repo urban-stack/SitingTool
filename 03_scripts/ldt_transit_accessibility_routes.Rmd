@@ -1,0 +1,130 @@
+---
+title: "ldt_transit_accessibility_routes"
+author: "Tianyu Su"
+date: "8/2/2021"
+output: html_document
+---
+
+! I updated this script on August 2 to use the preprocessed parcel centroid data with unique IDs.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/su/Desktop/Research/GSD_RA/LDT")
+```
+
+```{r}
+
+library(tidyverse)
+library(sf)
+
+library(ggplot2)
+library(leaflet)
+library(htmltools)
+library(htmlwidgets)
+library(mapview)
+mapviewOptions(platform = 'leafgl')
+
+```
+
+
+1. Load data
+```{r}
+
+# laod parcel data
+parcel_centroid_uniqueID <- st_read("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/parcel/parcel_centroid_uniqueID.geojson")
+parcel_centroid_uniqueID_sf <- st_as_sf(parcel_centroid_uniqueID)
+
+# laod travel time matrix
+travel_time <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/ttm/parcel_stops_ttm.csv")
+
+# load transit stop data
+pittsburgh_transit_stop <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/GTFS/stops.txt")
+# write.csv(pittsburgh_transit_stop, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/GTFS/pittsburgh_transit_stop.csv", row.names = FALSE)
+pittsburgh_transit_stop_sf <- st_as_sf(pittsburgh_transit_stop, coords = c("stop_lon", "stop_lat"), crs = 4326, agr = "constant")
+pittsburgh_transit_stop_sf
+
+# load transit stop-time data
+pittsburgh_transit_stopTime <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/GTFS/stop_times.txt")
+
+# load transit calendar data
+pittsburgh_transit_calendar <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/GTFS/calendar.txt")
+
+# load transit trip data
+pittsburgh_transit_trip <- read.csv("/Users/su/Desktop/Research/GSD_RA/LDT/02_data/GTFS/trips.txt")
+
+pittsburgh_transit_trip
+
+pittsburgh_transit_stopTime %>%
+  filter((trip_id == "7225010") & (arrival_time == "16:33:59"))
+
+
+```
+2. select arrivals that are regular on weekdays
+```{r}
+
+pittsburgh_transit_calendar
+
+pittsburgh_transit_trip_weekday <- pittsburgh_transit_trip %>%
+  filter(service_id %in% c(2, 2242, "W"))
+
+pittsburgh_transit_trip_weekday
+# about half of all trips
+
+pittsburgh_transit_stopTime_weekday <- pittsburgh_transit_stopTime %>%
+  filter(trip_id %in% unique(pittsburgh_transit_trip_weekday$trip_id))
+
+pittsburgh_transit_stopTime_weekday
+# about 1/3 of all daily arrivals
+
+```
+
+2. aggregate the arrivals by stop to calculate daily arrivals
+```{r}
+
+pittsburgh_transit_stopArrival <- pittsburgh_transit_stopTime_weekday %>%
+  group_by(stop_id) %>%
+  summarise(arrivals = n()) %>%
+  arrange(desc(arrivals))
+
+pittsburgh_transit_stopArrival
+
+```
+3. join arrivals to parcels and calculate daily arrivals
+```{r}
+
+travel_matrix <- travel_time %>%
+  rename(UNIQUEID = fromId,
+         stop_id = toId,
+         walk_time = travel_time) %>%
+  mutate(walk_distance = walk_time * 60 * 1) %>% # 1 means 1 meter/s
+  filter(walk_distance <= 500)
+
+travel_matrix_arrivals <- travel_matrix %>%
+  dplyr::select(UNIQUEID, stop_id) %>%
+  left_join(pittsburgh_transit_stopArrival, by = "stop_id")
+
+travel_matrix_arrivals
+
+daily_arrivals <- travel_matrix_arrivals %>%
+  group_by(UNIQUEID) %>%
+  summarise(daily_arrivals = sum(arrivals))
+
+daily_arrivals
+
+```
+4. Join the results with geometry
+
+```{r}
+
+# assemble the final data set
+## daily transit arrivals in 500m walking distance
+parcel_centroid_arrivals <- parcel_centroid_uniqueID_sf %>%
+  left_join(daily_arrivals, by = "UNIQUEID") %>%
+  dplyr::mutate(daily_arrivals = replace_na(daily_arrivals, 0))
+
+parcel_centroid_arrivals
+
+write.csv(parcel_centroid_arrivals, "/Users/su/Desktop/Research/GSD_RA/LDT/02_data/transitAccessibility/parcel_centroid_arrivals.csv", row.names = FALSE)
+
+```
+
