@@ -7,35 +7,214 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-```
 
-## Read in large file
+options(java.parameters = "-Xmx8G")
 
-
-```{r}
 library(tidyverse)
 library(sf)
+library(leaflet)
+library(htmlwidgets)
+library(r5r)
 ```
+
+# Load feasibilty data
+
+Parcel locations from: https://data.wprdc.org/dataset/geocoders/resource/42231cab-8341-48d6-b695-47612dd6514a
+
+Parcel data from: https://data.wprdc.org/dataset/property-assessments/resource/f2b8d575-e256-4718-94ad-1e12239ddb92
+
+Grocery (WIC vendors): https://openac-alcogis.opendata.arcgis.com/datasets/ab9ec54e46d8403db31cff6bdc890aff_0.geojson
+
+Parks data (in amenities folder) from: https://pittsburghparks.org/explore-your-parks/park-overview-and-map/
+
+```{r, message=FALSE}
+pitt_boundary_url <- "https://pghgishub-pittsburghpa.opendata.arcgis.com/datasets/a99f25fffb7b41c8a4adf9ea676a3a0b_0.geojson?outSR=%7B%22latestWkid%22%3A2272%2C%22wkid%22%3A102729%7D"
+
+parcel_loc_url <- "https://data.wprdc.org/dataset/6bb2a968-761d-48cf-ac5b-c1fc80b4fe6a/resource/42231cab-8341-48d6-b695-47612dd6514a/download/parcelcoords.csv"
+
+parcel_data_url <- "https://data.wprdc.org/dataset/2b3df818-601e-4f06-b150-643557229491/resource/f2b8d575-e256-4718-94ad-1e12239ddb92/download/assessments.csv"
+
+pitt_boundary <- st_read(pitt_boundary_url)
+
+parcel_data <- read_csv(parcel_data_url) %>%
+  filter(PROPERTYCITY == "PITTSBURGH") %>%
+  select(PARID, 
+         USEDESC, 
+         LOTAREA, 
+         FAIRMARKETBUILDING, 
+         FAIRMARKETLAND, 
+         FAIRMARKETTOTAL) %>%
+  rename(id = PARID) %>%
+  mutate(log_tot_val = log10(FAIRMARKETTOTAL)) %>%
+  mutate(log_tot_val = ifelse(is.infinite(log_tot_val), 0, log_tot_val)) %>%
+  mutate(log_area = log10(LOTAREA)) %>%
+  mutate(log_area = ifelse(is.infinite(log_area), 0, log_area)) %>%
+  mutate(circle_radius = LOTAREA^0.5/20) %>%
+  mutate(vacant = str_detect(USEDESC, "VACANT")) %>%
+  mutate(bldg_pct_val = FAIRMARKETBUILDING / FAIRMARKETTOTAL)
+
+parcels <- st_read(parcel_loc_url,
+                       options=c("X_POSSIBLE_NAMES=x",
+                                 "Y_POSSIBLE_NAMES=y"), 
+                       crs = "WGS84") %>%
+  select(PIN) %>%
+  rename(id = PIN) %>%
+  st_filter(pitt_boundary) %>%
+  left_join(parcel_data) 
+```
+
+## Map feasibility data
+
+# Map data 
+
+(move this to separate script later?)
 
 ```{r}
-ami <- st_read(
-  "Data/parsed_data/percentage_between_80-120_AMI.geojson") %>%
-  rename(pct_lt_80ami = perc_citizens_lower_than_80.ami,
-    pct80_120ami = perc_citizens_betwee80..120.ami,
-    pct_gt_120ami = perc_citizens_higher_than_120.ami) %>%
-  select(OBJECTID, pct_lt_80ami, pct80_120ami, pct_gt_120ami) %>%
-  st_set_geometry(NULL)
+map_center_lon <- mean(c(st_bbox(pitt_boundary)$xmin, st_bbox(pitt_boundary)$xmax))
+map_center_lat <- mean(c(st_bbox(pitt_boundary)$ymin, st_bbox(pitt_boundary)$ymax))
 
-gen_entropy <- st_read(
-  "Data/parsed_data/age_entropy.geojson")
+pal_value <- colorNumeric("RdYlBu", parcels$log_val)
+pal_area <- colorNumeric("RdYlBu", parcels$log_area)
+pal_vacant <- colorFactor("RdBu", parcels$vacant)
+pal_bldg_val <- colorNumeric("RdYlBu", parcels$bldg_pct_val)
+pal_parks <- colorNumeric("RdYlBu", parcels$parks_access)
 
-parcels <- st_read("Data/parsed_data/pittsburgh_parcels_centroids.geojson") %>%
-  select(OBJECTID) %>%
-  left_join(ami)
+map <- leaflet(parcels) %>%
+ addProviderTiles("CartoDB.DarkMatter") %>%
+ addCircles(color = ~pal_bldg_val(bldg_pct_val), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   group = "building_value") %>%
+  addLegend("bottomright", 
+            pal = pal_bldg_val, 
+            values = ~vacant,
+            title = "Building share of value",
+            opacity = 1,
+            group = "building_value",
+            className = "info legend building_value") %>%
+  addCircles(color = ~pal_vacant(vacant), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   group = "vacant") %>%
+  addLegend("bottomright", 
+            pal = pal_vacant, 
+            values = ~vacant,
+            title = "Vacancy",
+            opacity = 1,
+            group = "vacant",
+            className = "info legend vacant") %>%
+  addCircles(color = ~pal_value(log_tot_val), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   group = "property_value") %>%
+  addLegend("bottomright", 
+            pal = pal_value, 
+            values = ~log_tot_val,
+            title = "Assessed property value",
+            labFormat = labelFormat(prefix = "$",
+                                    big.mark = ",",
+                                    transform = function(x) 10^x),
+            opacity = 1,
+            group = "property_value",
+            className = "info legend property_value") %>%
+  addCircles(color = ~pal_area(log_area), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   group = "area") %>%
+  addLegend("bottomright", 
+            pal = pal_area, 
+            values = ~log_area,
+            title = "Lot size (square feet)",
+            labFormat = labelFormat(big.mark = ",",
+                                    transform = function(x) 10^x),
+            opacity = 1,
+            group = "area",
+            className = "info legend area") %>%
+  addLayersControl(baseGroups = c("building_value", "vacant", "property_value", "area"),
+                   options = layersControlOptions(collapsed = FALSE)) %>%
+   setView(lng = map_center_lon, lat = map_center_lat, zoom = 13) %>%
+  
+  onRender("
+      function(el, x) {
+         var updateLegend = function () {
+            var selectedGroup = document.querySelectorAll('input:checked')[0].nextSibling.innerText.substr(1);
+            document.querySelectorAll('.legend').forEach(a => a.hidden=true);
+            document.querySelectorAll('.legend').forEach(l => {
+               if (l.classList.contains(selectedGroup)) l.hidden=false;
+            });
+         };
+         updateLegend();
+         this.on('baselayerchange', el => updateLegend());
+      }"
+   )
+
+saveWidget(map, file="map.html")
+```
+
+# Load tract-level census data
+
+# Calculate accessibility data
+
+## Get street network
+
+
+```{r}
+r5r_core <- setup_r5("networks", verbose = FALSE)
+```
+
+
+## Parks
+
+```{r}
+parks <- st_read("amenities/PittsburghParks.kml") 
+
+parks <- parks %>%
+  mutate(id = seq(1, length(parks$geometry), by=1),
+         numParks = 1)
+  
+# grocery store accessibility
+access_parks <- accessibility(r5r_core,
+                        origins = parcels,
+                        destinations = parks,
+                        mode = "WALK",
+                        opportunities_colname = "numParks",
+                        decay_function = "exponential",
+                        cutoffs = 10,
+                        max_walk_dist = 5000,
+                        verbose = FALSE) %>%
+  rename(id = from_id,
+         parks_access = accessibility) %>%
+  select(id, parks_access)
+
+parcels <- parcels %>%
+  left_join(access_parks)
+
+stop_r5()
+```
+
+
+## Grocery stores
+
+
+## Transit arrivals
+
+
+## Jobs
 
 
 
+# Write data
+
+```{r}
 st_write(parcels, dsn = "parcels.geojson")
 ```
+
+
+
+
 
 
