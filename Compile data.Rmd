@@ -8,14 +8,36 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-options(java.parameters = "-Xmx8G")
+#options(java.parameters = "-Xmx8G")
 
 library(tidyverse)
 library(sf)
 library(leaflet)
 library(htmlwidgets)
-library(r5r)
+#library(r5r)
 ```
+
+# Load parcel locations
+
+```{r}
+pitt_boundary_url <- "https://pghgishub-pittsburghpa.opendata.arcgis.com/datasets/a99f25fffb7b41c8a4adf9ea676a3a0b_0.geojson?outSR=%7B%22latestWkid%22%3A2272%2C%22wkid%22%3A102729%7D"
+
+parcel_loc_url <- "https://data.wprdc.org/dataset/6bb2a968-761d-48cf-ac5b-c1fc80b4fe6a/resource/42231cab-8341-48d6-b695-47612dd6514a/download/parcelcoords.csv"
+
+pitt_boundary <- st_read(pitt_boundary_url)
+
+parcels <- st_read(parcel_loc_url,
+                       options=c("X_POSSIBLE_NAMES=x",
+                                 "Y_POSSIBLE_NAMES=y"), 
+                       crs = "WGS84") %>%
+  select(PIN) %>%
+  rename(id = PIN) %>%
+  filter(id != "",
+         id != "COMMON GROUND")
+
+parcels <- parcels[pitt_boundary,]
+```
+
 
 # Load feasibilty data
 
@@ -28,22 +50,10 @@ Grocery (WIC vendors): https://openac-alcogis.opendata.arcgis.com/datasets/ab9ec
 Parks data (in amenities folder) from: https://pittsburghparks.org/explore-your-parks/park-overview-and-map/
 
 ```{r, message=FALSE}
-pitt_boundary_url <- "https://pghgishub-pittsburghpa.opendata.arcgis.com/datasets/a99f25fffb7b41c8a4adf9ea676a3a0b_0.geojson?outSR=%7B%22latestWkid%22%3A2272%2C%22wkid%22%3A102729%7D"
-
-parcel_loc_url <- "https://data.wprdc.org/dataset/6bb2a968-761d-48cf-ac5b-c1fc80b4fe6a/resource/42231cab-8341-48d6-b695-47612dd6514a/download/parcelcoords.csv"
-
 parcel_data_url <- "https://data.wprdc.org/dataset/2b3df818-601e-4f06-b150-643557229491/resource/f2b8d575-e256-4718-94ad-1e12239ddb92/download/assessments.csv"
-
-pitt_boundary <- st_read(pitt_boundary_url)
 
 parcel_data <- read_csv(parcel_data_url) %>%
   filter(PROPERTYCITY == "PITTSBURGH") %>%
-  select(PARID, 
-         USEDESC, 
-         LOTAREA, 
-         FAIRMARKETBUILDING, 
-         FAIRMARKETLAND, 
-         FAIRMARKETTOTAL) %>%
   rename(id = PARID) %>%
   mutate(log_tot_val = log10(FAIRMARKETTOTAL)) %>%
   mutate(log_tot_val = ifelse(is.infinite(log_tot_val), 0, log_tot_val)) %>%
@@ -51,15 +61,13 @@ parcel_data <- read_csv(parcel_data_url) %>%
   mutate(log_area = ifelse(is.infinite(log_area), 0, log_area)) %>%
   mutate(circle_radius = LOTAREA^0.5/20) %>%
   mutate(vacant = str_detect(USEDESC, "VACANT")) %>%
-  mutate(bldg_pct_val = FAIRMARKETBUILDING / FAIRMARKETTOTAL)
+  mutate(bldg_pct_val = FAIRMARKETBUILDING / FAIRMARKETTOTAL) %>%
+  mutate(PROPERTYFRACTION = ifelse(is.na(PROPERTYFRACTION), "", PROPERTYFRACTION)) %>%
+  mutate(address = paste(PROPERTYHOUSENUM, PROPERTYFRACTION, PROPERTYADDRESS)) %>%
+  select(id, circle_radius, FAIRMARKETTOTAL, LOTAREA, 
+         log_tot_val, log_area, vacant, bldg_pct_val, address)
 
-parcels <- st_read(parcel_loc_url,
-                       options=c("X_POSSIBLE_NAMES=x",
-                                 "Y_POSSIBLE_NAMES=y"), 
-                       crs = "WGS84") %>%
-  select(PIN) %>%
-  rename(id = PIN) %>%
-  st_filter(pitt_boundary) %>%
+parcels_feasibility <- parcels %>%
   left_join(parcel_data) 
 ```
 
@@ -78,12 +86,13 @@ pal_area <- colorNumeric("RdYlBu", parcels$log_area)
 pal_vacant <- colorFactor("RdBu", parcels$vacant)
 pal_bldg_val <- colorNumeric("RdYlBu", parcels$bldg_pct_val)
 
-map <- leaflet(parcels) %>%
- addProviderTiles("CartoDB.DarkMatter") %>%
+map <- leaflet(parcels_feasibility) %>%
+# addProviderTiles("CartoDB.DarkMatter") %>%
  addCircles(color = ~pal_bldg_val(bldg_pct_val), 
                    stroke = FALSE,
                    radius = ~circle_radius,
                    fillOpacity = 0.9,
+                   popup = ~address,
                    group = "building_value") %>%
   addLegend("bottomright", 
             pal = pal_bldg_val, 
@@ -172,7 +181,7 @@ r5r_core <- setup_r5("networks", verbose = FALSE)
 parks <- st_read("amenities/PittsburghParks.kml") 
 
 parks <- parks %>%
-  mutate(id = seq(1, length(parks$geometry), by=1),
+  mutate(id = as.character(seq(1, length(parks$geometry), by=1)),
          numParks = 1)
   
 # grocery store accessibility
@@ -181,15 +190,14 @@ access_parks <- accessibility(r5r_core,
                         destinations = parks,
                         mode = "WALK",
                         opportunities_colname = "numParks",
-                        decay_function = "exponential",
-                        cutoffs = 10,
-                        max_walk_dist = 5000,
+                        decay_function = "step",
+                        cutoffs = 30,
                         verbose = FALSE) %>%
   rename(id = from_id,
          parks_access = accessibility) %>%
   select(id, parks_access)
 
-parcels <- parcels %>%
+parcels_access <- parcels %>%
   left_join(access_parks)
 ```
 
