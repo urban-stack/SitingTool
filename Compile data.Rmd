@@ -77,7 +77,6 @@ pal_value <- colorNumeric("RdYlBu", parcels$log_val)
 pal_area <- colorNumeric("RdYlBu", parcels$log_area)
 pal_vacant <- colorFactor("RdBu", parcels$vacant)
 pal_bldg_val <- colorNumeric("RdYlBu", parcels$bldg_pct_val)
-pal_parks <- colorNumeric("RdYlBu", parcels$parks_access)
 
 map <- leaflet(parcels) %>%
  addProviderTiles("CartoDB.DarkMatter") %>%
@@ -152,7 +151,7 @@ map <- leaflet(parcels) %>%
       }"
    )
 
-saveWidget(map, file="map.html")
+saveWidget(map, file="feasibility.html")
 ```
 
 # Load tract-level census data
@@ -192,7 +191,9 @@ access_parks <- accessibility(r5r_core,
 
 parcels <- parcels %>%
   left_join(access_parks)
+```
 
+```{r}
 stop_r5()
 ```
 
