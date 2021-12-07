@@ -14,6 +14,7 @@ library(tidyverse)
 library(sf)
 library(leaflet)
 library(htmlwidgets)
+library(mapdeck)
 #library(r5r)
 ```
 
@@ -26,7 +27,7 @@ parcel_loc_url <- "https://data.wprdc.org/dataset/6bb2a968-761d-48cf-ac5b-c1fc80
 
 pitt_boundary <- st_read(pitt_boundary_url)
 
-parcels <- st_read(parcel_loc_url,
+parcel_points <- st_read(parcel_loc_url,
                        options=c("X_POSSIBLE_NAMES=x",
                                  "Y_POSSIBLE_NAMES=y"), 
                        crs = "WGS84") %>%
@@ -35,7 +36,16 @@ parcels <- st_read(parcel_loc_url,
   filter(id != "",
          id != "COMMON GROUND")
 
-parcels <- parcels[pitt_boundary,]
+parcel_points <- parcel_points[pitt_boundary,]
+
+parcel_poly <- st_read("data/parcel_data.geojson") %>%
+  mutate(log_tot_val = log10(FAIRMARKETTOTAL__asmt)) %>%
+  mutate(log_tot_val = ifelse(is.infinite(log_tot_val), 0, log_tot_val)) %>%
+  mutate(log_area = log10(LOTAREA__asmt)) %>%
+  mutate(log_area = ifelse(is.infinite(log_area), 0, log_area)) %>%
+  mutate(vacant = str_detect(USEDESC__asmt, "VACANT")) %>%
+  mutate(bldg_pct_val = FAIRMARKETBUILDING__asmt / FAIRMARKETTOTAL__asmt) %>%
+  mutate(address = paste(PROPERTYHOUSENUM__asmt, PROPERTYFRACTION__asmt, PROPERTYADDRESS__asmt)) 
 ```
 
 
@@ -77,7 +87,110 @@ parcels_feasibility <- parcels %>%
 
 (move this to separate script later?)
 
-```{r}
+It would be cool if we could show an image of the lot in the popup. 
+https://github.com/fitnr/everylotbot
+
+```{r mapdeck map}
+map_center_lon <- mean(c(st_bbox(pitt_boundary)$xmin, st_bbox(pitt_boundary)$xmax))
+map_center_lat <- mean(c(st_bbox(pitt_boundary)$ymin, st_bbox(pitt_boundary)$ymax))
+
+pal_value <- colorNumeric("RdYlBu", parcels$log_val)
+pal_area <- colorNumeric("RdYlBu", parcels$log_area)
+pal_vacant <- colorFactor("RdBu", parcels$vacant)
+pal_bldg_val <- colorNumeric("RdYlBu", parcels$bldg_pct_val)
+
+
+bldg_map <- mapdeck(style = mapdeck_style('dark')) %>%
+  add_sf(
+    data = parcel_poly,
+    fill_colour = "bldg_pct_val",
+    stroke_width = 0.1,
+    palette = "spectral",
+   legend = TRUE
+  ) %>%
+  mapdeck_view(location = c(map_center_lon, map_center_lat, zoom = 13))
+
+saveWidget(bldg_map, file="building-val.html")
+```
+map <- leaflet(parcels_feasibility) %>%
+# addProviderTiles("CartoDB.DarkMatter") %>%
+ addCircles(color = ~pal_bldg_val(bldg_pct_val), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   popup = ~address,
+                   group = "building_value") %>%
+  addLegend("bottomright", 
+            pal = pal_bldg_val, 
+            values = ~vacant,
+            title = "Building share of value",
+            opacity = 1,
+            group = "building_value",
+            className = "info legend building_value") %>%
+  addCircles(color = ~pal_vacant(vacant), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   group = "vacant") %>%
+  addLegend("bottomright", 
+            pal = pal_vacant, 
+            values = ~vacant,
+            title = "Vacancy",
+            opacity = 1,
+            group = "vacant",
+            className = "info legend vacant") %>%
+  addCircles(color = ~pal_value(log_tot_val), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   group = "property_value") %>%
+  addLegend("bottomright", 
+            pal = pal_value, 
+            values = ~log_tot_val,
+            title = "Assessed property value",
+            labFormat = labelFormat(prefix = "$",
+                                    big.mark = ",",
+                                    transform = function(x) 10^x),
+            opacity = 1,
+            group = "property_value",
+            className = "info legend property_value") %>%
+  addCircles(color = ~pal_area(log_area), 
+                   stroke = FALSE,
+                   radius = ~circle_radius,
+                   fillOpacity = 0.9,
+                   group = "area") %>%
+  addLegend("bottomright", 
+            pal = pal_area, 
+            values = ~log_area,
+            title = "Lot size (square feet)",
+            labFormat = labelFormat(big.mark = ",",
+                                    transform = function(x) 10^x),
+            opacity = 1,
+            group = "area",
+            className = "info legend area") %>%
+  addLayersControl(baseGroups = c("building_value", "vacant", "property_value", "area"),
+                   options = layersControlOptions(collapsed = FALSE)) %>%
+   setView(lng = map_center_lon, lat = map_center_lat, zoom = 13) %>%
+  
+  onRender("
+      function(el, x) {
+         var updateLegend = function () {
+            var selectedGroup = document.querySelectorAll('input:checked')[0].nextSibling.innerText.substr(1);
+            document.querySelectorAll('.legend').forEach(a => a.hidden=true);
+            document.querySelectorAll('.legend').forEach(l => {
+               if (l.classList.contains(selectedGroup)) l.hidden=false;
+            });
+         };
+         updateLegend();
+         this.on('baselayerchange', el => updateLegend());
+      }"
+   )
+
+saveWidget(map, file="feasibility.html")
+```
+
+
+```{r leaflet map}
 map_center_lon <- mean(c(st_bbox(pitt_boundary)$xmin, st_bbox(pitt_boundary)$xmax))
 map_center_lat <- mean(c(st_bbox(pitt_boundary)$ymin, st_bbox(pitt_boundary)$ymax))
 
