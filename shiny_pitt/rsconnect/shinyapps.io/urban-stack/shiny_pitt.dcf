@@ -1,0 +1,13 @@
+name: shiny_pitt
+title: shiny_pitt
+username:
+account: urban-stack
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 5285860
+bundleId: 5341422
+url: https://urban-stack.shinyapps.io/shiny_pitt/
+when: 1638902100.71271
+lastSyncTime: 1638902100.71271
+asMultiple: FALSE
+asStatic: FALSE
